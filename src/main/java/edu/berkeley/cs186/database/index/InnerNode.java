@@ -81,41 +81,121 @@ class InnerNode extends BPlusNode {
     @Override
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
-
-        return null;
+        int index = numLessThanEqual(key,keys);
+        Long pageNum = children.get(index);
+        BPlusNode childNode = BPlusNode.fromBytes(metadata,bufferManager,treeContext,pageNum);
+        while(childNode instanceof InnerNode){
+            childNode = ((InnerNode) childNode).get(key);
+        }
+        return childNode.get(key);
     }
+
+
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
         // TODO(proj2): implement
-
-        return null;
+        Long pageNum = children.get(0);
+        BPlusNode childNode = BPlusNode.fromBytes(metadata,bufferManager,treeContext,pageNum);
+        while(childNode instanceof InnerNode){
+            pageNum = ((InnerNode) childNode).children.get(0);
+            childNode = BPlusNode.fromBytes(metadata,bufferManager,treeContext,pageNum);
+        }
+        return childNode.getLeftmostLeaf();
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(proj2): implement
+        BPlusNode child = getChild(numLessThanEqual(key,keys));
+        Optional<Pair<DataBox, Long>> pair = child.put(key,rid);
+        if(!pair.isPresent()){
+            return pair;
+        } else{
+            //there is a splitting in the leaf node, we need to insert the first key of the right
+            // splitting node
+            int insertIndex = numLessThan(pair.get().getFirst(),keys);
+            keys.add(insertIndex,pair.get().getFirst());
+            children.add(insertIndex+1,pair.get().getSecond());
+            if(keys.size()<=metadata.getOrder()*2){
+                //no splitting
+                sync();
+                return Optional.empty();
+            }else {
+                //the number of keys exceeds the limit we need to split the innerNode
+                DataBox splitKey = keys.get(metadata.getOrder());
+                List<DataBox> newKeys = new ArrayList<>();
+                List<Long> newChildren = new ArrayList<>();
+                int order = metadata.getOrder();
+                newKeys = keys.subList( order+1,keys.size());
+                newChildren = children.subList(order+1, children.size());
 
-        return Optional.empty();
+                keys = keys.subList(0,order);
+                children = children.subList(0,order+1);
+                sync();
+            //Notice: when the inner node split the mid-key no longer stay in this layer, it goes up
+                InnerNode newNode = new InnerNode(metadata,bufferManager,newKeys,newChildren,treeContext);
+                Long rightSibPage = newNode.getPage().getPageNum();
+                return Optional.of(new Pair<DataBox,Long>(splitKey,rightSibPage));
+            }
+        }
     }
 
     // See BPlusNode.bulkLoad.
+    /*2. Inner nodes should repeatedly try to bulk load the rightmost child
+     * until either the inner node is full (in which case it should split)
+     * or there is no more data.
+     * The splitting process of the inner node in bulkload is as same as
+     */
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(proj2): implement
+        int order = metadata.getOrder();
+        BPlusNode rightMostChild = getChild(children.size()-1);
+        Optional<Pair<DataBox, Long>> pair = rightMostChild.bulkLoad(data, fillFactor);
+        //check overflow
+        if(!pair.isPresent()){
+            sync();
+            return Optional.empty();
+        }else{
+            int insertIndex = numLessThan(pair.get().getFirst(),keys);
+            keys.add(insertIndex,pair.get().getFirst());
+            children.add(insertIndex+1,pair.get().getSecond());
+            if(keys.size()<=metadata.getOrder()*2){
+                //no splitting
+                sync();
+                return Optional.empty();
+            }else {
+                //the number of keys exceeds the limit we need to split the innerNode
+                DataBox splitKey = keys.get(metadata.getOrder());
+                List<DataBox> newKeys = new ArrayList<>();
+                List<Long> newChildren = new ArrayList<>();
+                order = metadata.getOrder();
+                newKeys = keys.subList( order+1,keys.size());
+                newChildren = children.subList(order+1, children.size());
 
-        return Optional.empty();
+                keys = keys.subList(0,order);
+                children = children.subList(0,order+1);
+                sync();
+                //Notice: when the inner node split the mid-key no longer stay in this layer, it goes up
+                InnerNode newNode = new InnerNode(metadata,bufferManager,newKeys,newChildren,treeContext);
+                Long rightSibPage = newNode.getPage().getPageNum();
+                return Optional.of(new Pair<DataBox,Long>(splitKey,rightSibPage));
+            }
+        }
     }
 
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
         // TODO(proj2): implement
-
+        BPlusNode leaf = get(key);
+        leaf.remove(key);
+        sync();
         return;
     }
 
@@ -249,11 +329,13 @@ class InnerNode extends BPlusNode {
 
     @Override
     public String toSexp() {
+
         StringBuilder sb = new StringBuilder("(");
         for (int i = 0; i < keys.size(); ++i) {
             sb.append(getChild(i).toSexp()).append(" ").append(keys.get(i)).append(" ");
         }
         sb.append(getChild(children.size() - 1).toSexp()).append(")");
+
         return sb.toString();
     }
 
@@ -379,3 +461,4 @@ class InnerNode extends BPlusNode {
         return Objects.hash(page.getPageNum(), keys, children);
     }
 }
+

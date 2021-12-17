@@ -147,40 +147,96 @@ class LeafNode extends BPlusNode {
     @Override
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
-
-        return null;
+        return this;
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
-        // TODO(proj2): implement
-
-        return null;
+        // TODO(proj2): implemen
+        return this;
     }
 
-    // See BPlusNode.put.
-    @Override
+    // See BPlusNode put.
+    //@Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(proj2): implement
+        if(keys.contains(key)){
+            throw new BPlusTreeException("duplicated keys not accepted");
+        }
+        int insertIndex = InnerNode.numLessThan(key,keys);
+        keys.add(insertIndex,key);
+        rids.add(insertIndex,rid);
+        int order = metadata.getOrder();
+        if(keys.size()<=order*2){
+            sync();
+            return Optional.empty();
+        }
+        //need to split
+        //System.out.println("need to split");
+        List<DataBox> newKeys = new ArrayList<>();
+        List<RecordId> newRids = new ArrayList<>();
+        newKeys = keys.subList(metadata.getOrder(),keys.size());
+        newRids = rids.subList(metadata.getOrder(),rids.size());
 
-        return Optional.empty();
+        keys = keys.subList(0,metadata.getOrder());
+        rids = rids.subList(0, metadata.getOrder());
+        //System.out.println("keys size after remove" + keys.size());
+        LeafNode newNode = new LeafNode(metadata,bufferManager,newKeys,newRids,rightSibling,
+            treeContext);
+        Long rightSibPage = newNode.getPage().getPageNum();
+        this.rightSibling = Optional.of(rightSibPage);
+        sync();
+        return Optional.of(new Pair<>(newNode.keys.get(0),newNode.getPage().getPageNum()));
     }
 
     // See BPlusNode.bulkLoad.
+    // If the number is greater than number * factor then split
+    // the left node has fill factor, right node has only one factor
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(proj2): implement
+        int maxThreshold = (int) Math.ceil(metadata.getOrder()*2*fillFactor);
+        while(keys.size()<= maxThreshold && data.hasNext()){
+            Pair<DataBox,RecordId> pair =  data.next();
+            DataBox key = pair.getFirst();
+            RecordId rid  = pair.getSecond();
+            if(keys.contains(key)){
+                throw new BPlusTreeException("duplicated keys not accepted");
+            }
+            int insertIndex = InnerNode.numLessThanEqual(key,keys);
+            keys.add(insertIndex,key);
+            rids.add(insertIndex,rid);
+        }
+        Optional<Pair<DataBox, Long>> pair = Optional.empty();
+        if (keys.size()>maxThreshold){
+            List<DataBox> newKeys = new ArrayList<>();
+            List<RecordId> newRids = new ArrayList<>();
+            newKeys.add(keys.remove(keys.size()-1));
+            newRids.add(rids.remove(rids.size()-1));
 
-        return Optional.empty();
+            LeafNode newNode = new LeafNode(metadata,bufferManager,newKeys,newRids,rightSibling,
+                treeContext);
+            Long rightSibPage  = newNode.getPage().getPageNum();
+            this.rightSibling = Optional.of(rightSibPage);
+            sync();
+            pair = Optional.of(new Pair<>(newNode.keys.get(0),rightSibPage));
+        }
+        sync();
+        return pair;
     }
 
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
         // TODO(proj2): implement
-
+        if(keys.contains(key)){
+            int deleteIndex = keys.indexOf(key);
+            keys.remove(deleteIndex);
+            rids.remove(deleteIndex);
+            sync();
+        }
         return;
     }
 
@@ -370,14 +426,27 @@ class LeafNode extends BPlusNode {
     /**
      * Loads a leaf node from page `pageNum`.
      */
+    //BUG I MADE: 当我们碰到没有Rightsibling的时候，我们必须给一个optional.Empty()
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
                                      LockContext treeContext, long pageNum) {
         // TODO(proj2): implement
         // Note: LeafNode has two constructors. To implement fromBytes be sure to
         // use the constructor that reuses an existing page instead of fetching a
         // brand new one.
-
-        return null;
+        Page page = bufferManager.fetchPage(treeContext,pageNum);
+        Buffer buf = page.getBuffer();
+        byte nodeType = buf.get();
+        assert (nodeType==(byte)1);
+        long rightSibling  = buf.getLong();
+        Optional<Long> rightSib = rightSibling ==-1 ? Optional.empty() : Optional.of(rightSibling);
+        int n = buf.getInt();
+        List<DataBox> keys = new ArrayList<>();
+        List<RecordId> recordIds = new ArrayList<>();
+        for(int i = 0; i < n; i++){
+            keys.add(DataBox.fromBytes(buf,metadata.getKeySchema()));
+            recordIds.add(RecordId.fromBytes(buf));
+        }
+        return new LeafNode(metadata,bufferManager,page,keys,recordIds, rightSib,treeContext);
     }
 
     // Builtins ////////////////////////////////////////////////////////////////

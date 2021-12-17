@@ -168,6 +168,7 @@ public class TestBPlusTree {
         //  /   \
         // (4) (6 9)
         tree.put(new IntDataBox(6), new RecordId(6, (short) 6));
+
         String l = "((4 (4 4)))";
         String r = "((6 (6 6)) (9 (9 9)))";
         assertEquals(String.format("(%s 6 %s)", l, r), tree.toSexp());

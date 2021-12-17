@@ -260,8 +260,10 @@ abstract class BPlusNode {
             Buffer buf = p.getBuffer();
             byte b = buf.get();
             if (b == 1) {
+                System.out.println(1);
                 return LeafNode.fromBytes(metadata, bufferManager, treeContext, pageNum);
             } else if (b == 0) {
+                System.out.println(0);
                 return InnerNode.fromBytes(metadata, bufferManager, treeContext, pageNum);
             } else {
                 String msg = String.format("Unexpected byte %b.", b);
